@@ -7,7 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import json
 import pickle
 
-caminho_chromedriver = r"C:\Users\Michele\Downloads\chromedriver-win64\chromedriver.exe"
+caminho_chromedriver = r"C:\chromedriver\chromedriver.exe"
 
 service = Service(executable_path=caminho_chromedriver)
 driver = webdriver.Chrome(service=service)
