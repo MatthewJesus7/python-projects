@@ -65,13 +65,33 @@ def collect_post_data(description):
         log("→ Buscando container do PDF antes do clique...", "blue")
         viewer = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-hook="file-upload-viewer"]')))
 
+        
+        # Tenta clicar na DIV diretamente
+        try:
+            driver.execute_script("""
+              const div = arguments[0];
+              ['mousedown', 'mouseup', 'click'].forEach(evt => {
+                div.dispatchEvent(new MouseEvent(evt, {bubbles: true, cancelable: true, view: window}));
+              });
+            """, viewer)
+            log("✓ Clique simulado na DIV com eventos reais.", "yellow")
+            time.sleep(2)
+        except Exception as e:
+            log(f"× Falha ao clicar na DIV: {e}", "red")
+
+        # Tenta clicar no botão dentro da div
         try:
             btn = viewer.find_element(By.TAG_NAME, "button")
-            # btn.click()
-            log("✓ Clique simulado com sucesso no botão de PDF.", "green")
+            driver.execute_script("""
+              const button = arguments[0];
+              ['mousedown', 'mouseup', 'click'].forEach(evt => {
+                button.dispatchEvent(new MouseEvent(evt, {bubbles: true, cancelable: true, view: window}));
+              });
+            """, btn)
+            log("✓ Clique simulado no botão com eventos reais.", "green")
             time.sleep(2)
         except NoSuchElementException:
-            log("× Botão não encontrado, tentando extrair direto...", "yellow")
+            log("× Botão para abrir PDF não encontrado.", "red")
 
         log("→ Buscando container do PDF após o clique...", "blue")
         viewer = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-hook="file-upload-viewer"]')))
