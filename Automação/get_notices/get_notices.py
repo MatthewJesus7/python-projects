@@ -22,16 +22,11 @@ def log(msg, color="white"):
 options = Options()
 options.add_argument("--start-maximized")
 options.add_argument("--disable-blink-features=AutomationControlled")
-options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
-driver = webdriver.Chrome(
-    service=Service(ChromeDriverManager().install()),
-    options=options
-)
-
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 wait = WebDriverWait(driver, 15)
 
-def scroll_until_loaded(selector, max_scrolls=50, scroll_pause_time=2):
+def scroll_until_loaded(selector, max_scrolls=50, scroll_pause_time=5):
     last_count = 0
     for _ in range(max_scrolls):
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -45,42 +40,33 @@ def scroll_until_loaded(selector, max_scrolls=50, scroll_pause_time=2):
 def collect_post_data(description):
     wait.until(EC.presence_of_element_located((By.TAG_NAME, "article")))
     article = driver.find_element(By.TAG_NAME, "article")
-    full_title = article.find_element(By.TAG_NAME, "h1").text
-    full_date = article.find_element(By.CLASS_NAME, "time-ago").text
-    full_read = article.find_element(By.CSS_SELECTOR, "[data-hook='time-to-read']").text
-    full_pars = article.find_elements(By.CSS_SELECTOR, "main p")
-    full_text = "\n".join(p.text for p in full_pars)
+    full_text = article.text.strip()
+    full_read = description in full_text
 
     post_data = {
-        "titulo": full_title,
-        "descricao": description,
-        "data": full_date,
+        "desc": description,
         "leitura": full_read,
         "texto": full_text,
         "pdf": None,
-        "todos_os_pdfs": []
+        "todos_os_pdfs": [],
+        "nome_pdf": None,
+        "bloco_pdf": None
     }
 
     try:
-        log("→ Buscando container do PDF antes do clique...", "blue")
+        log("→ Buscando botão (div) para abrir PDF...", "blue")
         viewer = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-hook="file-upload-viewer"]')))
 
-        
-        # Tenta clicar na DIV diretamente
-        try:
+        # Clique duplo simulado (eventos reais)
+        for _ in range(2):
             driver.execute_script("""
               const div = arguments[0];
               ['mousedown', 'mouseup', 'click'].forEach(evt => {
                 div.dispatchEvent(new MouseEvent(evt, {bubbles: true, cancelable: true, view: window}));
               });
             """, viewer)
-            log("✓ Clique simulado na DIV com eventos reais.", "yellow")
-            time.sleep(2)
-        except Exception as e:
-            log(f"× Falha ao clicar na DIV: {e}", "red")
+            time.sleep(0.3)
 
-        # Tenta clicar no botão dentro da div
-        try:
             btn = viewer.find_element(By.TAG_NAME, "button")
             driver.execute_script("""
               const button = arguments[0];
@@ -89,48 +75,64 @@ def collect_post_data(description):
               });
             """, btn)
             log("✓ Clique simulado no botão com eventos reais.", "green")
-            time.sleep(2)
-        except NoSuchElementException:
-            log("× Botão para abrir PDF não encontrado.", "red")
+            time.sleep(0.3)
 
-        log("→ Buscando container do PDF após o clique...", "blue")
-        viewer = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-hook="file-upload-viewer"]')))
-        time.sleep(1)
+        log("✓ Clique duplo (quadruplo) real simulado no botão e div.", "green")
 
+        # Espera sólida por qualquer link contendo PDF
+        log("⏳ Esperando o PDF aparecer após clique...", "yellow")
+        wait.until(lambda d: len([
+            el for el in d.find_elements(By.CSS_SELECTOR, 'a, iframe, embed')
+            if "pdf" in (el.get_attribute("href") or el.get_attribute("src") or "").lower()
+        ]) > 0)
+
+        # Extrair PDFs
         pdf_links = []
-
-        # Procurar por <a>, <iframe> ou <embed>
         for tag in ["a", "iframe", "embed"]:
-            try:
-                elements = viewer.find_elements(By.TAG_NAME, tag)
-                for el in elements:
-                    href = el.get_attribute("href") or el.get_attribute("src")
-                    if href and "pdf" in href.lower():
-                        pdf_links.append(href)
-            except:
-                continue
+            elements = driver.find_elements(By.TAG_NAME, tag)
+            for el in elements:
+                href = el.get_attribute("href") or el.get_attribute("src")
+                if href and "pdf" in href.lower():
+                    pdf_links.append(href)
 
         if pdf_links:
             post_data["pdf"] = pdf_links[0]
-            post_data["todos_os_pdfs"] = list(set(pdf_links))  # remove duplicatas
+            post_data["todos_os_pdfs"] = list(set(pdf_links))
             log(f"✓ PDF(s) extraído(s): {post_data['todos_os_pdfs']}", "green")
         else:
-            log("× Nenhum PDF encontrado após o clique.", "red")
+            log("× Nenhum PDF encontrado após clique.", "red")
+
+        # Tentar pegar div com "Download PDF"
+        try:
+            download_div = next(
+                el for el in driver.find_elements(By.CSS_SELECTOR, "div")
+                if "download pdf" in el.text.lower()
+            )
+            post_data["bloco_pdf"] = download_div.text.strip()
+        except StopIteration:
+            log("× Div com 'Download PDF' não encontrada.", "red")
+
+        # Nome do PDF (caso tenha)
+        try:
+            name_div = driver.find_element(By.CSS_SELECTOR, '[data-hook="file-upload-name-container"]')
+            post_data["nome_pdf"] = name_div.text.strip()
+        except NoSuchElementException:
+            log("× Nome do PDF não encontrado.", "red")
 
     except TimeoutException:
-        log("× Timeout: container 'file-upload-viewer' não apareceu ou mudou.", "red")
+        log("× Timeout esperando conteúdo do PDF.", "red")
 
     return post_data
 
 def main():
     driver.get("https://www.townofhortonia.org/blog")
     wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".item-link-wrapper")))
+
     items = scroll_until_loaded(".item-link-wrapper")
     links = []
     for item in items:
         try:
-            a_tag = item.find_element(By.TAG_NAME, "a")
-            href = a_tag.get_attribute("href")
+            href = item.find_element(By.TAG_NAME, "a").get_attribute("href")
             desc = item.find_element(By.CSS_SELECTOR, "div.BOlnTh").text.strip()
             if href:
                 links.append((href, desc))
